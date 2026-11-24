@@ -1,6 +1,6 @@
 # bid-mcp
 
-대한민국 공공 SW·SI 입찰(**조달청 나라장터 G2B**)과 스마트팩토리·AI·SW·바우처 정부지원사업(**기업마당 Bizinfo**) 공고를 AI 에이전트가 직접 검색·상세조회·첨부파일 다운로드할 수 있게 해주는 **Rust 기반 초경량 로컬 MCP(Model Context Protocol) 서버**입니다.
+대한민국 공공 SW·SI 입찰(**조달청 나라장터 G2B 본공고 & 사전규격**)과 스마트팩토리·AI·SW·바우처 정부지원사업(**기업마당 Bizinfo**) 공고를 AI 에이전트가 직접 검색·상세조회·첨부파일 다운로드할 수 있게 해주는 **Rust 기반 초경량 로컬 MCP(Model Context Protocol) 서버**입니다.
 
 Google Antigravity(CLI · IDE · 2.0 App), Gemini CLI, Claude Code, Codex CLI 등 `stdio` 기반 MCP를 지원하는 프론티어 AI 에이전트에 단일 바이너리로 연결해 사용할 수 있습니다.
 
@@ -28,7 +28,7 @@ Google Antigravity(CLI · IDE · 2.0 App), Gemini CLI, Claude Code, Codex CLI �
 * **단일 바이너리 (`stdio`):** Python 가상환경(`venv`)이나 의존성 충돌 없이 컴파일된 바이너리 파일 1개만 에이전트 설정에 지정하면 바로 동작합니다.
 * **역할 분담 최적화:**
   * **`bid-mcp` (MCP 서버):** OpenAPI 호출, 1차 조건 필터링, 조회기간 분할, 중복 제거, 첨부파일 로컬 다운로드까지만 가볍게 담당합니다.
-  * **프론티어 에이전트 CLI:** PDF 제안요청서(RFP)는 내장 문서 읽기 도구로 직접 열람하고, 한국 공공기관 특유의 `.hwp` / `.hwpx` 파일은 로컬 변환 도구(`hwp5txt` 등)를 터미널에서 실행해 핵심 과업·참가자격만 요약합니다.
+  * **프론티어 에이전트 CLI:** PDF 제안요청서(RFP)는 내장 문서 읽기 도구로 직접 열람하고, 한국 공공기관 특유의 `.hwp` / `.hwpx` 파일은 로컬 변환 도구(`rhwp` 등)를 터미널에서 실행해 핵심 과업·참가자격만 요약합니다.
 * **나라장터 + 기업마당 통합 이유:**
   * 일반 공공 SW·SI 발주는 **나라장터**, 스마트팩토리(공급기업 매칭)·AI/클라우드/데이터 바우처·지역 테크노파크 사업은 **기업마당** 비중이 높습니다.
   * 두 포털을 합쳐도 MCP Tool이 **4개뿐**이라 에이전트 컨텍스트 부담이 적고, 첨부파일 다운로더와 HTTP 클라이언트를 공유할 수 있습니다.
@@ -39,11 +39,12 @@ Google Antigravity(CLI · IDE · 2.0 App), Gemini CLI, Claude Code, Codex CLI �
         │ (MCP over stdio / JSON-RPC)
         ▼
    [ bid-mcp ]  ──▶ 나라장터 OpenAPI (입찰공고정보서비스 v1.3, 13개 오퍼레이션)
+        │       ──▶ 나라장터 사전규격정보서비스 v1.0 (8개 오퍼레이션)
         │       ──▶ 기업마당 OpenAPI (지원사업정보 API)
         │       ──▶ 첨부파일 다운로드 (www.g2b.go.kr / www.bizinfo.go.kr)
         ▼
   ./downloads/  ──▶ PDF: 에이전트 내장 리더로 직접 분석
-                ──▶ HWP/HWPX: 로컬 변환 도구(hwp5txt 등)로 텍스트 추출 후 분석
+                ──▶ HWP/HWPX: 로컬 변환 도구(rhwp 등)로 텍스트 추출 후 분석
 ```
 
 ---
@@ -56,10 +57,11 @@ bid-mcp/
 ├── README.md                   # 프로젝트 문서
 └── src/
     ├── main.rs                 # stdio MCP 서버 진입점, 환경변수 로드, HTTP 클라이언트 초기화
-    ├── server.rs               # rmcp 기반 MCP Tool 4개 정의 및 서버 지침(instructions)
+    ├── server.rs               # rmcp 기반 MCP Tool 6개 정의 및 서버 지침(instructions)
     └── clients/
         ├── mod.rs              # 클라이언트 모듈 선언
         ├── g2b.rs              # 나라장터 입찰공고정보서비스 v1.3 (13개 오퍼레이션)
+        ├── g2b_prespec.rs      # 나라장터 사전규격정보서비스 v1.0 (목록 + 규격서 의견)
         ├── bizinfo.rs          # 기업마당 지원사업정보 API 클라이언트
         └── download.rs         # 나라장터·기업마당 공통 첨부파일 다운로더
 ```
@@ -74,6 +76,8 @@ bid-mcp/
 | :--- | :---: | :--- |
 | **`search_g2b_bids`** | 나라장터 | 용역(`servc`) · 물품(`thng`) · 기타(`etc`) 공고를 키워드·수요기관·업종·지역·추정가격으로 검색 |
 | **`get_g2b_bid_detail`** | 나라장터 | 공고번호 1개로 최신 차수 상세 + 기초금액 + 면허제한 + 참가가능지역 + **일반/e발주/혁신장터 첨부파일** + 변경이력을 병렬 일괄 조회 |
+| **search_g2b_prespecs** | 나라장터 (사전규격) | 본 공고 전 사전규격(RFP 초안)을 용역·물품·공사·외자별로 검색 (SW사업·최소예산·본공고 미전환 필터 지원) |
+| **get_g2b_prespec_opinions** | 나라장터 (사전규격) | 특정 사전규격등록번호(R26BD...)의 타 업체 질의·이의제기, 발주처 답변 및 첨부된 수정 RFP URL 조회 |
 | **`search_bizinfo_programs`** | 기업마당 | 스마트팩토리·바우처·R&D 등 정부/지자체/테크노파크 지원사업 검색 + 사업개요 + 첨부/본문 PDF URL 반환 |
 | **`download_attachment`** | 공통 | 나라장터(`g2b.go.kr`) 및 기업마당(`bizinfo.go.kr`) 첨부파일을 로컬 폴더에 저장하고 확장자별 처리 힌트 반환 |
 
@@ -93,6 +97,22 @@ bid-mcp/
 #### 2) `get_g2b_bid_detail`
 * `bid_no` *(필수)*: 차세대 나라장터 입찰공고번호 (예: `R26BK00933736`)
 * `category`: `"servc"`(기본값) | `"thng"` | `"etc"`
+
+#### 3) `search_g2b_prespecs`
+* `category`: `"servc"`(용역, 기본값) | `"thng"`(물품) | `"cnstwk"`(공사) | `"frgcpt"`(외자)
+* `bf_spec_rgst_no`: 사전규격등록번호 단건 조회 (예: `R26BD00189302`, 지정 시 최우선)
+* `ref_no`: 참조번호 조회
+* `keyword`: 품명/사업명 검색 키워드 (`prdctClsfcNoNm`)
+* `ntce_instt_nm` / `dminstt_nm`: 공고(발주)기관명 / 수요기관명 일부
+* `sw_biz_only`: SW사업 대상(`swBizObjYn=Y`)만 필터링 (기본값 `false`, 공사 제외)
+* `min_budget`: 최소 배정예산액 필터(원, 클라이언트 측 필터)
+* `only_open_opinion`: 의견등록마감일시가 남아있는 건만 조회 (기본값 `false`)
+* `only_before_bid`: 아직 본 입찰공고로 넘어가지 않은 건만 조회 (기본값 `false`)
+* `days_back`: 최근 N일 이내 접수 건 조회 (기본값 `7`, 최대 `30`)
+
+#### 4) `get_g2b_prespec_opinions`
+* `bf_spec_rgst_no` (필수): 사전규격등록번호 (예: `R26BD00189302`)
+* `category`: `"servc"`(기본값) | `"thng"` | `"cnstwk"` | `"frgcpt"`
 
 #### 3) `search_bizinfo_programs`
 * `keyword`: 공고명·사업개요·해시태그·지원대상·기관명 클라이언트 필터 키워드
@@ -142,6 +162,16 @@ bid-mcp/
    * 표 명세와 XML 예제 간 대소문자·키 이름 차이(`pubPrcrmntLrgClsfcNm`/`pubPrcrmntLrgclsfcNm`, `atchDocDivNm`/`docDivNm`)를 모두 fallback 파싱합니다.
    * v1.2 공식 필드명 오타(`befBidBbancNo`)와 XML 응답 내 `&amp;` URL 이스케이프를 그대로 반영·정규화했습니다.
    * `type=json` 요청에도 게이트웨이/키 오류 시 XML이 반환되는 공공데이터포털 특성을 감지해 명확한 에러 메시지를 출력합니다.
+
+### B. 조달청 나라장터 사전규격정보서비스 (`v1.0`)
+
+* **Base URL:** `https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService`
+* **참고:** 입찰공고정보서비스와 **같은 `G2B_API_KEY`를 사용**하지만, 공공데이터포털에서 별도 활용신청이 필요합니다. 오퍼레이션명 끝에 `02`가 붙지 않으며 인증키 파라미터명이 `ServiceKey`(대문자 S)입니다.
+
+| 문서 번호 | 오퍼레이션명 | 국문명 | 연결 Tool | 주요 역할 |
+| :---: | :--- | :--- | :--- | :--- |
+| **13~16** | `getPublicPrcureThngInfo{Thng\|Frgcpt\|Servc\|Cnstwk}PPSSrch` | 나라장터 검색조건에 의한 사전규격 목록 조회 | `search_g2b_prespecs` |  접수일시·사전규격번호·참조번호·품명·SW사업여부 검색 및 규격서 초안 URL(`1~5`) 반환 |
+| **17~20** | `getPublicPrcureThngOpinionInfo{Thng\|Frgcpt\|Servc\|Cnstwk}` | 나라장터 사전규격 규격서 의견 목록 조회 | `get_g2b_prespec_opinions` | 업체 의견(`rplyNo=0`) 및 발주처 답변(`rplyNo>=1`), 수정 RFP 첨부 URL(`1~5`) 조회 |
 
 #### 주요 참가제한지역코드 (`region_cd`)
 | 코드 | 지역 | 코드 | 지역 | 코드 | 지역 |
@@ -317,11 +347,22 @@ BID_DOWNLOAD_DIR = "/절대경로/bid-workspace/downloads"
 
 ### 로컬 문서 변환 도구 설치 (권장)
 ```bash
-# 1) 구형 .hwp 텍스트 추출 (hwp5txt 명령 제공)
-pip install pyhwp
+# rhwp 설치 (PDF/PNG 렌더링 포함 시 --features native-skia 추가 또는 GitHub Release 바이너리 사용)
+cargo install rhwp --locked --bin rhwp
+```
 
-# 2) 신형 .hwpx 텍스트 추출 (선택 — python-hwpx 또는 기본 unzip + XML 파싱)
-pip install python-hwpx
+`mcp_config.json`에 `bid-mcp`와 나란히 등록:
+
+```json
+{
+  "mcpServers": {
+    "bid-mcp": { "...": "..." },
+    "rhwp": {
+      "command": "rhwp",
+      "args": ["mcp-serve"]
+    }
+  }
+}
 ```
 
 ### 에이전트 지침 파일 예시 (`AGENTS.md` / `GEMINI.md` / `CLAUDE.md`)
@@ -338,8 +379,7 @@ pip install python-hwpx
 ## 2. 상세 확인 및 RFP 분석
 - 유망한 나라장터 공고는 반드시 `get_g2b_bid_detail`을 호출해 면허제한, 참가가능지역, 기초금액, e발주 RFP(attachments)를 확인한다.
 - 첨부파일 다운로드 시 **PDF(공고서 변환본, print_doc)를 최우선**으로 받아 내장 도구로 읽는다.
-- `.hwp` 파일만 있으면 `download_attachment`로 받은 뒤 `hwp5txt <파일경로>`로 텍스트를 추출해 읽는다.
-- `.hwpx` 파일은 `python3` 또는 `unzip`으로 `Contents/section*.xml` 텍스트를 추출해 읽는다.
+- `.hwp`/`.hwpx` 파일만 있으면 `download_attachment`로 내려받은 뒤 `rhwp`로 분석한다.
 - 제안요청서 전체를 그대로 복붙하지 말고, **사업목적 / 핵심 과업 범위 / 기술 스택 / 참가자격(면허·실적·지역) / 예산 / 마감일 / 특이사항** 위주로 구조화해 요약한다.
 ```
 
@@ -389,11 +429,3 @@ curl -G "https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do" \
 ### 실전 테스트 시 체크할 포인트
 * 나라장터 공식 문서 예제는 XML 기반이므로, 실제 `type=json` 호출 시 간혹 `items` 구조나 특정 신규 필드의 대소문자가 다를 수 있습니다. (`g2b.rs`에 다중 방어 로직이 들어 있으나, 특이 응답이 보이면 실제 JSON 샘플 기준으로 조정하세요.)
 * 일부 기관의 첨부파일 다운로드 URL이 세션/리다이렉트를 요구하거나 파일명이 EUC-KR로 인코딩되어 내려오는 경우 `src/clients/download.rs`에 헤더/인코딩 보완을 추가할 수 있습니다.
-
----
-
-## 11. 향후 확장 로드맵
-
-* **나라장터 사전규격정보서비스 추가:** 본 공고 전 사전규격 단계에서 제안서(RFP) 초안을 미리 확보하기 위한 `search_g2b_prespec` Tool 확장 (동일 `G2B_API_KEY` 사용 가능, 포털에서 별도 활용신청 필요)
-* **국책 R&D (NTIS RSS/API) 연동:** AI·디지털트윈·제조 SW R&D 과제 탐색용 `src/clients/ntis.rs` 추가
-* **비-API 포털 분리 운영:** 스마트공장 사업관리시스템(`smart-factory.kr`)이나 공기업 자체 조달(한전 SRM, 국방 D2B 등)처럼 웹 크롤링(Playwright 등)이 필요한 경우, 가벼운 `bid-mcp`에 섞지 않고 별도의 크롤링 전용 MCP 서버로 분리하는 구성을 권장합니다.

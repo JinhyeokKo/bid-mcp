@@ -2,6 +2,7 @@ use crate::clients::{
     bizinfo::{self, BizinfoSearchQuery},
     download,
     g2b::{self, BidCategory, BidSearchQuery},
+    g2b_prespec::{self, PrespecCategory, PrespecSearchQuery},
 };
 use reqwest::Client;
 use rmcp::{
@@ -13,6 +14,42 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::path::PathBuf;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SearchPrespecParams {
+    /// 업무구분: "servc"(용역, 기본값), "thng"(물품), "cnstwk"(공사), "frgcpt"(외자)
+    pub category: Option<PrespecCategory>,
+    /// 사전규격등록번호 단건 조회 (예: "R26BD00189302", 지정 시 최우선)
+    pub bf_spec_rgst_no: Option<String>,
+    /// 참조번호 조회
+    pub ref_no: Option<String>,
+    /// 품명/사업명 검색 키워드 (예: "AI", "스마트공장", "유지보수", "플랫폼")
+    pub keyword: Option<String>,
+    /// 공고(발주)기관명 일부
+    pub ntce_instt_nm: Option<String>,
+    /// 수요기관명 일부
+    pub dminstt_nm: Option<String>,
+    /// SW사업 대상(swBizObjYn=Y)만 필터링 여부 (기본값: false, 공사 제외)
+    pub sw_biz_only: Option<bool>,
+    /// 세부품명번호 10자리 (용역/물품 전용)
+    pub dtil_prdct_no: Option<String>,
+    /// 최소 배정예산액 (원화, 예: 100000000 = 1억원 이상만 필터)
+    pub min_budget: Option<u64>,
+    /// 의견등록마감일시가 남아있는 건만 조회 (기본값: false)
+    pub only_open_opinion: Option<bool>,
+    /// 아직 본 입찰공고로 넘어가지 않은 건만 조회 (기본값: false)
+    pub only_before_bid: Option<bool>,
+    /// 최근 며칠 이내 접수된 사전규격 조회 (기본값: 7, 최대 30)
+    pub days_back: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetPrespecOpinionsParams {
+    /// 사전규격등록번호 (예: "R26BD00189302")
+    pub bf_spec_rgst_no: String,
+    /// 업무구분: "servc"(용역, 기본값), "thng"(물품), "cnstwk"(공사), "frgcpt"(외자)
+    pub category: Option<PrespecCategory>,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchG2bParams {
@@ -93,6 +130,62 @@ impl BidMcpServer {
             g2b_key,
             bizinfo_key,
             default_download_dir,
+        }
+    }
+
+    #[tool(description = "나라장터 사전규격(본 공고 전 공개되는 RFP 초안)을 용역/물품/공사/외자별로 검색합니다. SW사업 필터, 최소 배정예산, 본공고 미전환 필터를 지원하며 규격서(RFP 초안) 다운로드 URL을 반환합니다.")]
+    async fn search_g2b_prespecs(
+        &self,
+        Parameters(p): Parameters<SearchPrespecParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let query = PrespecSearchQuery {
+            category: p.category.unwrap_or(PrespecCategory::Servc),
+            bf_spec_rgst_no: p.bf_spec_rgst_no,
+            ref_no: p.ref_no,
+            keyword: p.keyword,
+            ntce_instt_nm: p.ntce_instt_nm,
+            dminstt_nm: p.dminstt_nm,
+            sw_biz_only: p.sw_biz_only.unwrap_or(false),
+            dtil_prdct_no: p.dtil_prdct_no,
+            min_budget: p.min_budget,
+            only_open_opinion: p.only_open_opinion.unwrap_or(false),
+            only_before_bid: p.only_before_bid.unwrap_or(false),
+            days_back: p.days_back.unwrap_or(7),
+        };
+
+        match g2b_prespec::search_prespecs(&self.http, &self.g2b_key, &query).await {
+            Ok(list) => {
+                let payload = serde_json::json!({
+                    "count": list.len(),
+                    "items": list,
+                });
+                let text = serde_json::to_string_pretty(&payload).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "나라장터 사전규격 검색 실패: {e:#}"
+            ))])),
+        }
+    }
+
+    #[tool(description = "특정 나라장터 사전규격(bf_spec_rgst_no)에 등록된 타 업체의 규격서 의견·이의제기와 발주처 답변, 첨부된 수정 RFP 파일 URL을 조회합니다.")]
+    async fn get_g2b_prespec_opinions(
+        &self,
+        Parameters(p): Parameters<GetPrespecOpinionsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let category = p.category.unwrap_or(PrespecCategory::Servc);
+        match g2b_prespec::get_prespec_opinions(&self.http, &self.g2b_key, category, &p.bf_spec_rgst_no).await {
+            Ok(list) => {
+                let payload = serde_json::json!({
+                    "count": list.len(),
+                    "items": list,
+                });
+                let text = serde_json::to_string_pretty(&payload).unwrap_or_default();
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "사전규격 의견 조회 실패: {e:#}"
+            ))])),
         }
     }
 

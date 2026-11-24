@@ -107,14 +107,55 @@ fn sanitize_filename(name: &str) -> String {
 }
 
 fn extract_filename_from_disposition(header: &str) -> Option<String> {
+    // 1순위: filename*=UTF-8''...
     for part in header.split(';') {
-        let p = part.trim();
-        if let Some(rest) = p.strip_prefix("filename=") {
-            let unquoted = rest.trim().trim_matches('"');
-            if !unquoted.is_empty() {
-                return Some(unquoted.to_string());
+        let trimmed = part.trim();
+        if let Some(rest) = trimmed.strip_prefix("filename*=") {
+            let val = rest.trim().trim_matches('"');
+            let encoded = val.split_once("''").map(|(_, b)| b).unwrap_or(val);
+            let decoded = percent_decode_utf8(encoded);
+            if !decoded.is_empty() {
+                return Some(decoded);
+            }
+        }
+    }
+    // 2순위: filename="..."
+    for part in header.split(';') {
+        let trimmed = part.trim();
+        if let Some(rest) = trimmed.strip_prefix("filename=") {
+            let val = rest.trim().trim_matches('"');
+            let decoded = percent_decode_utf8(val);
+            if !decoded.is_empty() {
+                return Some(decoded);
             }
         }
     }
     None
+}
+
+fn percent_decode_utf8(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
